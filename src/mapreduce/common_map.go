@@ -1,7 +1,12 @@
 package mapreduce
 
 import (
+	"bytes"
+	"encoding/json"
+	"fmt"
 	"hash/fnv"
+	"io/ioutil"
+	"os"
 )
 
 // doMap manages one map task: it reads one of the input files
@@ -14,6 +19,48 @@ func doMap(
 	nReduce int, // the number of reduce task that will be run ("R" in the paper)
 	mapF func(file string, contents string) []KeyValue,
 ) {
+
+	inputFile, err := os.Open(inFile)
+	if err != nil {
+
+		panic(fmt.Sprintf("Failed to open file:%s err:%s \n", inFile, err.Error()))
+	}
+
+	content, err := ioutil.ReadAll(inputFile)
+	if err != nil {
+
+		panic(fmt.Sprintf("Failed to read file:%s err:%s\n", inFile, err.Error()))
+
+	}
+
+	readBuffer := bytes.NewBuffer(content)
+	kv := mapF(inFile, readBuffer.String())
+	intermediateFile := make(map[int]*os.File)
+	encoders := make(map[int]*json.Encoder)
+	for _, e := range kv {
+		r := ihash(e.Key) % nReduce
+		//fmt.Printf("r:%d nReduce:%d\n", r, nReduce)
+
+		file, ok := intermediateFile[r]
+		if !ok {
+			fileName := reduceName(jobName, mapTaskNumber, r)
+			if file, err = os.Create(fileName); err != nil {
+				panic(fmt.Sprintf("Failed to crate file:%s err:%s\n", fileName, err.Error()))
+			}
+			intermediateFile[r] = file
+			encoders[r] = json.NewEncoder(file)
+		}
+
+		encoder := encoders[r]
+		encoder.Encode(&e)
+
+	}
+
+	for _, e := range intermediateFile {
+		e.Close()
+	}
+	inputFile.Close()
+
 	//
 	// You will need to write this function.
 	//

@@ -1,5 +1,11 @@
 package mapreduce
 
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+)
+
 // doReduce manages one reduce task: it reads the intermediate
 // key/value pairs (produced by the map phase) for this task, sorts the
 // intermediate key/value pairs by key, calls the user-defined reduce function
@@ -11,11 +17,46 @@ func doReduce(
 	nMap int, // the number of map tasks that were run ("M" in the paper)
 	reduceF func(key string, values []string) string,
 ) {
+
+	kvs := make(map[string][]string)
+	for i := 0; i < nMap; i++ {
+		fileName := reduceName(jobName, i, reduceTaskNumber)
+		file, err := os.Open(fileName)
+		if err != nil {
+
+			panic(fmt.Sprintf("Failed to open file:%s err:%s\n", fileName, err.Error()))
+		}
+
+		decoder := json.NewDecoder(file)
+		for decoder.More() {
+			kv := new(KeyValue)
+			decoder.Decode(kv)
+			kvArray, ok := kvs[kv.Key]
+			if !ok {
+				kvArray = make([]string, 0)
+				kvs[kv.Key] = kvArray
+			}
+			kvArray = append(kvArray, kv.Value)
+			kvs[kv.Key] = kvArray
+		}
+		file.Close()
+	}
+
+	outputFile, _ := os.Create(outFile)
+	encoder := json.NewEncoder(outputFile)
+	kv := new(KeyValue)
+	for k, v := range kvs {
+		res := reduceF(k, v)
+		kv.Key = k
+		kv.Value = res
+		encoder.Encode(kv)
+	}
+	outputFile.Close()
 	//
 	// You will need to write this function.
 	//
 	// You'll need to read one intermediate file from each map task;
-	// reduceName(jobName, m, reduceTaskNumber) yields the file
+	// reduceName(jbName, m, reduceTaskNumber) yields the file
 	// name from map task m.
 	//
 	// Your doMap() encoded the key/value pairs in the intermediate
